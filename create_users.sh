@@ -1,10 +1,18 @@
 #!/bin/bash
 
-mkdir -p /var/log /var/secure
+if [ "$#" -ne 1 ]; then
+    echo "Usage: $0 <name-of-text-file>"
+    exit 1
+fi
 
-file="/mnt/c/Users/USER/file.txt"
+file="$1"
 log_file="/var/log/user_management.log"
-password_file="/var/secure/user_passwords.txt"
+password_file="/var/secure/user_passwords.csv"
+
+sudo mkdir -p /var/log /var/secure
+sudo touch "$log_file"
+sudo touch "$password_file"
+sudo chmod 600 "$password_file"
 
 generate_password() {
     local length="${1:-12}"
@@ -13,7 +21,7 @@ generate_password() {
 
 log_message() {
     local message="$1"
-    echo "$(date +'%Y-%m-%d %H:%M:%S') - $message" >> "$log_file"
+    echo "$(date +'%Y-%m-%d %H:%M:%S') - $message" | sudo tee -a "$log_file" > /dev/null
 }
 
 while IFS=';' read -r username groups_str; do
@@ -21,7 +29,7 @@ while IFS=';' read -r username groups_str; do
     groups_str=$(echo "$groups_str" | tr -d '[:space:]')
 
     if ! id "$username" &>/dev/null; then
-        if groupadd "$username" &>> "$log_file"; then
+        if sudo groupadd "$username" &>> "$log_file"; then
             log_message "Group $username created successfully."
         else
             log_message "Failed to create group $username."
@@ -29,7 +37,7 @@ while IFS=';' read -r username groups_str; do
             continue
         fi
         
-        if useradd -m -s /bin/bash -g "$username" "$username" &>> "$log_file"; then
+        if sudo useradd -m -s /bin/bash -g "$username" "$username" &>> "$log_file"; then
             log_message "User $username created successfully."
         else
             log_message "Failed to create user $username."
@@ -38,16 +46,16 @@ while IFS=';' read -r username groups_str; do
         fi
         
         password=$(generate_password)
-        if echo "$username:$password" | chpasswd &>> "$log_file"; then
+        if echo "$username:$password" | sudo chpasswd &>> "$log_file"; then
             log_message "Password for $username set successfully."
         else
             log_message "Failed to set password for $username."
             echo "Failed to set password for $username" >&2
         fi
         
-        echo "$username:$password" >> "$password_file"
+        echo "$username,$password" | sudo tee -a "$password_file" > /dev/null
 
-        if chmod 700 "/home/$username" &>> "$log_file" && chown -R "$username:$username" "/home/$username" &>> "$log_file"; then
+        if sudo chmod 700 "/home/$username" &>> "$log_file" && sudo chown -R "$username:$username" "/home/$username" &>> "$log_file"; then
             log_message "Permissions set for /home/$username."
         else
             log_message "Failed to set permissions for /home/$username."
@@ -61,7 +69,7 @@ while IFS=';' read -r username groups_str; do
     IFS=',' read -ra groups <<< "$groups_str"
     for group in "${groups[@]}"; do
         if ! grep -q "^$group:" /etc/group; then
-            if groupadd "$group" &>> "$log_file"; then
+            if sudo groupadd "$group" &>> "$log_file"; then
                 log_message "Group $group created successfully."
                 echo "Group $group created successfully."
             else
@@ -71,7 +79,7 @@ while IFS=';' read -r username groups_str; do
             fi
         fi
 
-        if usermod -aG "$group" "$username" &>> "$log_file"; then
+        if sudo usermod -aG "$group" "$username" &>> "$log_file"; then
             log_message "User $username added to group $group."
         else
             log_message "Failed to add $username to group $group."
